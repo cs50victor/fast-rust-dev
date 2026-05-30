@@ -207,9 +207,15 @@ fn is_cargo_build_target(dir: &Path) -> bool {
     dir.join(".rustc_info.json").is_file() && has_cargo_cachedir_tag(dir)
 }
 
-/// Whether `dir/CACHEDIR.TAG` is a regular file beginning with cargo's signature,
-/// byte-for-byte the check cargo's own `cargo clean` performs before removing a dir.
+/// Whether `dir/CACHEDIR.TAG` is a regular file beginning with the CACHEDIR.TAG
+/// signature, byte-for-byte the check cargo's own `cargo clean` performs before removing a dir.
 fn has_cargo_cachedir_tag(dir: &Path) -> bool {
+    // NOTE(provenance): the 43-byte magic header mandated by the Cache Directory Tagging
+    // Spec (https://bford.info/cachedir/), not a cargo-specific value -- every conforming
+    // cache wears it, which is why `.rustc_info.json` is needed to single out a build dir.
+    // Frozen by the spec and hardcoded identically by cargo's own `validate_target_dir_tag`
+    // (src/cargo/ops/cargo_clean.rs), so hardcoding is canonical: the value is not derivable,
+    // and the `cachedir` crate would only re-export this same literal.
     const SIGNATURE: &[u8] = b"Signature: 8a477f597d28d172789f06886806bc55";
     let tag = dir.join("CACHEDIR.TAG");
     // Per the CACHEDIR.TAG spec the tag must be a regular file, never a symlink.
