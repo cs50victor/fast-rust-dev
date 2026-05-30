@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same branch or PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Incremental artifacts cannot be shared across CI runs and sccache will not cache
+  # them, so disable them: smaller output, faster, higher sccache hit rate.
+  CARGO_INCREMENTAL: "0"
+  # Route every rustc call through sccache, backed by the GitHub Actions cache, so
+  # compiled crates are reused across runs (the cold-build win for CI).
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
+
+jobs:
+  fmt-and-test:
+    name: fmt + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable toolchain (with rustfmt)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Set up sccache (GitHub Actions cache backend)
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run tests
+        run: cargo test --locked
+
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
