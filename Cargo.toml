@@ -5,6 +5,9 @@ edition = "2024"
 description = "Speed up local Rust builds and shrink target/ with interactive cargo and profile tuning"
 license = "MIT"
 repository = "https://github.com/cs50victor/fast-rust-dev"
+readme = "README.md"
+keywords = ["cargo", "build", "performance", "disk", "optimization"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 anyhow = "1.0.102"
@@ -12,4 +15,11 @@ clap = { version = "4.6.1", features = ["derive"] }
 console = "0.16.3"
 dirs = "6.0.0"
 similar = "3.1.1"
+# Pinned to 0.36 on purpose: it has MSRV 1.75 (below our edition-2024 floor, so no cost),
+# while 0.37+ raises the MSRV and 0.39 needs Rust 1.95. Only RAM and disk facts are used.
+sysinfo = { version = "0.36", default-features = false, features = ["system", "disk"] }
 toml_edit = "0.25.12"
+
+# frd recommends `strip` to the projects it tunes, so it ships its own binaries stripped too.
+[profile.release]
+strip = true

@@ -1,8 +1,12 @@
 //! Best-effort system and project facts. Every probe degrades to None instead of
-//! failing, so a missing tool never aborts the report.
+//! failing, so a missing tool never aborts the report. Memory and disk facts come
+//! from sysinfo (native on macOS, Linux, and Windows) rather than shelling out to
+//! Unix-only tools, so the same probes work on every supported platform.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use sysinfo::{Disks, System};
 
 #[derive(Debug, Clone)]
 pub struct SystemReport {
@@ -47,7 +51,7 @@ impl SystemReport {
             os: std::env::consts::OS,
             arch: std::env::consts::ARCH,
             cores: cores(),
-            ram_bytes: sysctl_u64("hw.memsize"),
+            ram_bytes: total_ram_bytes(),
             disk_total_bytes,
             disk_free_bytes,
             rustc_version,
@@ -72,9 +76,24 @@ impl SystemReport {
 
 /// True if `tool` resolves to a file on PATH. Cheap enough to call ad hoc.
 pub fn have(tool: &str) -> bool {
-    std::env::var_os("PATH")
-        .map(|paths| std::env::split_paths(&paths).any(|d| d.join(tool).is_file()))
-        .unwrap_or(false)
+    let Some(paths) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&paths).any(|dir| {
+        if dir.join(tool).is_file() {
+            return true;
+        }
+        // On Windows the binaries cargo installs carry an extension (e.g. sccache.exe),
+        // so a bare-name lookup misses them. Probe the usual executable extensions.
+        #[cfg(windows)]
+        {
+            ["exe", "cmd", "bat"]
+                .iter()
+                .any(|ext| dir.join(format!("{tool}.{ext}")).is_file())
+        }
+        #[cfg(not(windows))]
+        false
+    })
 }
 
 fn cores() -> usize {
@@ -83,12 +102,13 @@ fn cores() -> usize {
         .unwrap_or(1)
 }
 
-fn sysctl_u64(key: &str) -> Option<u64> {
-    let out = Command::new("sysctl").arg("-n").arg(key).output().ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+/// Total physical RAM in bytes, via sysinfo (works on macOS, Linux, and Windows).
+/// sysinfo reports 0 when it cannot read memory, which we treat as unknown.
+fn total_ram_bytes() -> Option<u64> {
+    let mut sys = System::new();
+    sys.refresh_memory();
+    let total = sys.total_memory();
+    (total > 0).then_some(total)
 }
 
 fn rustc_version() -> Option<String> {
@@ -99,42 +119,53 @@ fn rustc_version() -> Option<String> {
     Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-/// `df -Pk <path>` data row: Filesystem 1024-blocks Used Available Capacity Mount.
+/// Total and free bytes of the filesystem holding `path`, via sysinfo. Picks the
+/// mounted disk whose mount point is the longest prefix of `path` (the same disk
+/// `df <path>` would report). Returns (None, None) if no mount point matches.
 fn disk_total_free(path: &Path) -> (Option<u64>, Option<u64>) {
-    let Ok(out) = Command::new("df").arg("-Pk").arg(path).output() else {
-        return (None, None);
-    };
-    if !out.status.success() {
-        return (None, None);
+    // Make the path absolute without resolving symlinks: canonicalize() on Windows
+    // returns a `\\?\` verbatim prefix that breaks mount-point prefix matching.
+    let abs = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let disks = Disks::new_with_refreshed_list();
+    let best = disks
+        .list()
+        .iter()
+        .filter(|d| abs.starts_with(d.mount_point()))
+        .max_by_key(|d| d.mount_point().as_os_str().len());
+    match best {
+        Some(d) => (Some(d.total_space()), Some(d.available_space())),
+        None => (None, None),
     }
-    let text = String::from_utf8_lossy(&out.stdout);
-    let Some(row) = text.lines().nth(1) else {
-        return (None, None);
-    };
-    let f: Vec<&str> = row.split_whitespace().collect();
-    let kib = |i: usize| {
-        f.get(i)
-            .and_then(|s| s.parse::<u64>().ok())
-            .map(|k| k * 1024)
-    };
-    (kib(1), kib(3))
 }
 
-/// `du -sk <path>` first column (KiB). None when the path is absent.
+/// Total size in bytes of every regular file under `path`, summed iteratively so a
+/// deep tree cannot overflow the stack. Symlinks are skipped to avoid double-counting
+/// and cycles. None when the path is absent. Cross-platform replacement for `du -sk`.
 fn dir_size_bytes(path: &Path) -> Option<u64> {
     if !path.exists() {
         return None;
     }
-    let out = Command::new("du").arg("-sk").arg(path).output().ok()?;
-    if !out.status.success() {
-        return None;
+    let mut total: u64 = 0;
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
+                stack.push(entry.path());
+            } else if let Ok(meta) = entry.metadata() {
+                total += meta.len();
+            }
+        }
     }
-    let text = String::from_utf8_lossy(&out.stdout);
-    text.split_whitespace()
-        .next()?
-        .parse::<u64>()
-        .ok()
-        .map(|k| k * 1024)
+    Some(total)
 }
 
 fn global_cargo_config() -> PathBuf {

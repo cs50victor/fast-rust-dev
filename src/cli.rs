@@ -5,7 +5,7 @@ use std::path::PathBuf;
 #[command(
     name = "frd",
     version,
-    about = "fast rust dev: build and disk optimizer for macOS"
+    about = "fast rust dev: interactive build-speed and disk optimizer for cargo projects (best on macOS)"
 )]
 pub struct Cli {
     #[command(subcommand)]
