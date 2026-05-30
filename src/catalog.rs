@@ -177,12 +177,12 @@ pub fn build(r: &SystemReport) -> Vec<Suggestion> {
         out.push(sweep_sug(
             "Sweep stale build artifacts",
             Tag::Disk,
-            "Removes artifacts untouched for more than 15 days while keeping warm ones. \
+            "Removes artifacts untouched for more than 7 days while keeping warm ones. \
              Choose how wide to sweep: just this project, or any parent up to your home dir."
                 .into(),
             SweepSpec {
                 candidates: sweep_candidates(&p.root),
-                time_days: 15,
+                time_days: 7,
             },
         ));
     } else {
