@@ -7,9 +7,6 @@
 `target/`-shrinking changes one at a time. Accept or skip each; it changes nothing
 without your approval.
 
-Runs on macOS, Linux, and Windows. macOS gets the full catalog; elsewhere `frd` shows
-only the suggestions that fit (the `split-debuginfo` tweak, for one, is macOS-only).
-
 ## Install
 
 Prebuilt binary (no compile), via [cargo-binstall](https://github.com/cargo-bins/cargo-binstall):
