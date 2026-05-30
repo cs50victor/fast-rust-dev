@@ -103,7 +103,6 @@ pub enum Status {
 
 #[derive(Clone)]
 pub struct Suggestion {
-    pub id: &'static str,
     pub title: String,
     pub tag: Tag,
     pub why: String,

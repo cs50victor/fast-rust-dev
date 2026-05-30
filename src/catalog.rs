@@ -19,7 +19,6 @@ pub fn build(r: &SystemReport) -> Vec<Suggestion> {
 
     // --- global: ~/.cargo/config.toml ---
     out.push(toml_sug(
-        "shared-target-dir",
         "Shared target dir for every project and worktree",
         Tag::Disk,
         format!(
@@ -35,7 +34,6 @@ pub fn build(r: &SystemReport) -> Vec<Suggestion> {
 
     if r.nightly {
         out.push(toml_sug(
-            "no-embed-metadata",
             "Stop duplicating crate metadata into rlibs",
             Tag::Disk,
             "Nightly Cargo flag: roughly 5-35% smaller target/ by not embedding metadata \
@@ -54,7 +52,6 @@ pub fn build(r: &SystemReport) -> Vec<Suggestion> {
     // re-run frd and the wrapper appears.
     if have("sccache") {
         out.push(toml_sug(
-            "sccache-wrapper",
             "Route rustc through sccache",
             Tag::Both,
             "Caveat: this disables incremental compilation, so it helps cold and cross-project \
@@ -68,7 +65,6 @@ pub fn build(r: &SystemReport) -> Vec<Suggestion> {
         ));
     } else {
         out.push(install_sug(
-            "install-sccache",
             "Install sccache (cross-project compile cache)",
             Tag::Both,
             "Caches compiled crates across every project and survives cargo clean. Best for \
@@ -82,7 +78,6 @@ pub fn build(r: &SystemReport) -> Vec<Suggestion> {
     // --- project: ./Cargo.toml profiles ---
     if p.has_cargo_toml {
         out.push(toml_sug(
-            "dev-debug-line-tables",
             "dev profile: debug = line-tables-only",
             Tag::Disk,
             "Debug info is the biggest single contributor to target/ size. line-tables-only \
@@ -97,7 +92,6 @@ pub fn build(r: &SystemReport) -> Vec<Suggestion> {
 
         if r.is_macos() {
             out.push(toml_sug(
-                "dev-split-debuginfo",
                 "dev profile: split-debuginfo = unpacked (macOS)",
                 Tag::Speed,
                 "On macOS this speeds relinking in the edit loop by keeping debug info out \
@@ -112,7 +106,6 @@ pub fn build(r: &SystemReport) -> Vec<Suggestion> {
         }
 
         out.push(toml_sug(
-            "dev-deps-opt",
             "dev profile: opt-level = 2 for dependencies",
             Tag::Speed,
             "Compile dependencies optimized while your own crate stays at 0: snappier dev \
@@ -126,7 +119,6 @@ pub fn build(r: &SystemReport) -> Vec<Suggestion> {
         ));
 
         out.push(toml_sug(
-            "fast-build-profile",
             "Add a disk-light fast-build profile",
             Tag::Both,
             "A profile with no debug info for when you do not need a debugger: smallest \
@@ -147,7 +139,6 @@ pub fn build(r: &SystemReport) -> Vec<Suggestion> {
         ));
 
         out.push(toml_sug(
-            "release-strip",
             "release profile: strip = true",
             Tag::Disk,
             "Strip symbols and debug info from shipped binaries, shrinking target/release.".into(),
@@ -164,7 +155,6 @@ pub fn build(r: &SystemReport) -> Vec<Suggestion> {
     // a repo's own flags, which is the trap Oxide documents.
     if r.nightly && p.has_cargo_toml {
         out.push(toml_sug(
-            "nightly-frontend",
             "Nightly: parallel frontend + share-generics",
             Tag::Speed,
             "-Zthreads=0 parallelizes the compiler frontend; -Zshare-generics=y cuts \
@@ -181,7 +171,6 @@ pub fn build(r: &SystemReport) -> Vec<Suggestion> {
     // --- tools ---
     if !have("cargo-sweep") {
         out.push(install_sug(
-            "install-cargo-sweep",
             "Install cargo-sweep (disk reclaim)",
             Tag::Disk,
             "Garbage-collects stale build artifacts that Cargo never removes, by age, instead \
@@ -192,7 +181,6 @@ pub fn build(r: &SystemReport) -> Vec<Suggestion> {
         ));
     }
     out.push(run_sug(
-        "run-cargo-sweep",
         "Sweep stale artifacts in this project",
         Tag::Disk,
         "Removes artifacts untouched for more than 15 days while keeping warm ones. Re-run \
@@ -205,7 +193,6 @@ pub fn build(r: &SystemReport) -> Vec<Suggestion> {
 
     if !have("cargo-machete") {
         out.push(install_sug(
-            "install-cargo-machete",
             "Install cargo-machete (find unused deps)",
             Tag::Both,
             "Finds dependencies you no longer use. Fewer deps means less to compile and store."
@@ -227,16 +214,8 @@ fn shared_target_dir() -> String {
         .to_string()
 }
 
-fn toml_sug(
-    id: &'static str,
-    title: &str,
-    tag: Tag,
-    why: String,
-    scope: Scope,
-    ops: Vec<TomlOp>,
-) -> Suggestion {
+fn toml_sug(title: &str, tag: Tag, why: String, scope: Scope, ops: Vec<TomlOp>) -> Suggestion {
     Suggestion {
-        id,
         title: title.into(),
         tag,
         why,
@@ -244,16 +223,8 @@ fn toml_sug(
     }
 }
 
-fn install_sug(
-    id: &'static str,
-    title: &str,
-    tag: Tag,
-    why: String,
-    crate_name: &str,
-    bin: &str,
-) -> Suggestion {
+fn install_sug(title: &str, tag: Tag, why: String, crate_name: &str, bin: &str) -> Suggestion {
     Suggestion {
-        id,
         title: title.into(),
         tag,
         why,
@@ -265,7 +236,6 @@ fn install_sug(
 }
 
 fn run_sug(
-    id: &'static str,
     title: &str,
     tag: Tag,
     why: String,
@@ -274,7 +244,6 @@ fn run_sug(
     cwd: Option<PathBuf>,
 ) -> Suggestion {
     Suggestion {
-        id,
         title: title.into(),
         tag,
         why,
