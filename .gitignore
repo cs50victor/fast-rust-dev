@@ -1,0 +1,11 @@
+# Rust build output
+/target
+
+# Backups written by frd when it edits config files
+*.frd-bak-*
+
+# Local Claude Code config
+/.claude/
+
+# macOS
+.DS_Store
