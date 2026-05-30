@@ -63,6 +63,17 @@ pub fn is_applied(report: &SystemReport, change: &TomlChange) -> bool {
     change.ops.iter().all(|op| is_satisfied(&doc, op))
 }
 
+/// The `build.target-dir` value from the global cargo config, if set. Its presence is
+/// how the catalog knows the user has centralized their builds, which gates the offer
+/// to delete the now-redundant per-project `target/` dirs; the value is the one dir
+/// that purge must never delete.
+pub fn global_target_dir_value(report: &SystemReport) -> Option<PathBuf> {
+    let text = fs::read_to_string(&report.project.global_cargo_config).ok()?;
+    let doc = text.parse::<DocumentMut>().ok()?;
+    let path = ["build".to_string(), "target-dir".to_string()];
+    get_path(&doc, &path)?.as_str().map(PathBuf::from)
+}
+
 pub fn unified(before: &str, after: &str, label: &str) -> String {
     let diff = TextDiff::from_lines(before, after);
     let mut ud = diff.unified_diff();

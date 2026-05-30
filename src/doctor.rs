@@ -16,7 +16,7 @@ pub fn run(report: &SystemReport) -> bool {
     // and tool-based items, which status_of can classify as applied or pending.
     let (maintenance, checkable): (Vec<Suggestion>, Vec<Suggestion>) = catalog::build(report)
         .into_iter()
-        .partition(|s| matches!(s.action, Action::Sweep(_)));
+        .partition(|s| matches!(s.action, Action::Sweep(_) | Action::Purge(_)));
 
     println!("{}", style("Doctor: optimization checkup").bold().cyan());
     let mut pending = 0usize;
@@ -32,13 +32,16 @@ pub fn run(report: &SystemReport) -> bool {
         println!();
         println!("{}", style("Maintenance (re-run anytime):").dim());
         for s in &maintenance {
-            if let Action::Sweep(spec) = &s.action {
-                println!(
-                    "  {} {}",
-                    style(format!("{}:", s.title)).dim(),
-                    style(spec.display()).dim()
-                );
-            }
+            let detail = match &s.action {
+                Action::Sweep(spec) => spec.display(),
+                Action::Purge(spec) => spec.display(),
+                _ => continue,
+            };
+            println!(
+                "  {} {}",
+                style(format!("{}:", s.title)).dim(),
+                style(detail).dim()
+            );
         }
     }
 

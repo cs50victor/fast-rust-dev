@@ -186,6 +186,41 @@ pub fn cargo_target_dirs(root: &Path) -> Vec<PathBuf> {
     std::mem::take(&mut *found.lock().unwrap())
 }
 
+/// The cargo *build* target dirs under `root`: the [`cargo_target_dirs`] that are
+/// safe to delete. Cargo writes the same `CACHEDIR.TAG` into `target/`, the registry,
+/// and the git cache, so the tag alone cannot tell a rebuildable build dir from the
+/// crate cache. The discriminator is `.rustc_info.json`, which only a build dir holds.
+/// Used by the purge flow, where deleting the registry by mistake would throw away the
+/// user's downloaded crates.
+pub fn cargo_build_target_dirs(root: &Path) -> Vec<PathBuf> {
+    cargo_target_dirs(root)
+        .into_iter()
+        .filter(|dir| is_cargo_build_target(dir))
+        .collect()
+}
+
+/// A directory is a deletable cargo build target when it carries cargo's own
+/// `CACHEDIR.TAG` and a `.rustc_info.json` beside it. The first marker reuses cargo's
+/// `validate_target_dir_tag` guard; the second separates a build dir from the registry
+/// and git caches, which wear the identical tag but never hold `.rustc_info.json`.
+fn is_cargo_build_target(dir: &Path) -> bool {
+    dir.join(".rustc_info.json").is_file() && has_cargo_cachedir_tag(dir)
+}
+
+/// Whether `dir/CACHEDIR.TAG` is a regular file beginning with cargo's signature,
+/// byte-for-byte the check cargo's own `cargo clean` performs before removing a dir.
+fn has_cargo_cachedir_tag(dir: &Path) -> bool {
+    const SIGNATURE: &[u8] = b"Signature: 8a477f597d28d172789f06886806bc55";
+    let tag = dir.join("CACHEDIR.TAG");
+    // Per the CACHEDIR.TAG spec the tag must be a regular file, never a symlink.
+    if tag.is_symlink() || !tag.is_file() {
+        return false;
+    }
+    std::fs::read(&tag)
+        .map(|bytes| bytes.starts_with(SIGNATURE))
+        .unwrap_or(false)
+}
+
 fn global_cargo_config() -> PathBuf {
     if let Some(home) = std::env::var_os("CARGO_HOME") {
         return PathBuf::from(home).join("config.toml");
@@ -213,7 +248,7 @@ pub fn human_bytes(n: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{cargo_target_dirs, dir_size_bytes};
+    use super::{cargo_build_target_dirs, cargo_target_dirs, dir_size_bytes};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -236,6 +271,17 @@ mod tests {
     /// Marks `dir` as a cargo target by writing the CACHEDIR.TAG cargo leaves there.
     fn mark_target(dir: &Path) {
         write(&dir.join("CACHEDIR.TAG"), 177);
+    }
+
+    /// Writes the real cargo-signed CACHEDIR.TAG, matching the bytes cargo emits.
+    fn write_cargo_tag(dir: &Path) {
+        fs::create_dir_all(dir).unwrap();
+        fs::write(
+            dir.join("CACHEDIR.TAG"),
+            "Signature: 8a477f597d28d172789f06886806bc55\n\
+             # This file is a cache directory tag created by cargo.\n",
+        )
+        .unwrap();
     }
 
     #[test]
@@ -276,6 +322,27 @@ mod tests {
         // proj_a/target's size includes the pruned nested target's bytes (counted once).
         let total: u64 = found.iter().filter_map(|t| dir_size_bytes(t)).sum();
         assert_eq!(total, (177 + 1000) + (177 + 9) + (177 + 500));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn build_target_discovery_excludes_registry_like_caches() {
+        let root = scratch();
+        // A real build target: cargo-signed tag plus the .rustc_info.json only a build dir has.
+        let target = root.join("proj/target");
+        write_cargo_tag(&target);
+        write(&target.join(".rustc_info.json"), 24);
+        write(&target.join("debug/app"), 1000);
+        // A registry-like cache: same cargo CACHEDIR.TAG, but no .rustc_info.json. Must be skipped.
+        let registry = root.join("registry");
+        write_cargo_tag(&registry);
+        write(&registry.join("cache/some.crate"), 5000);
+
+        assert_eq!(
+            cargo_build_target_dirs(&root),
+            vec![target],
+            "the crate cache wears the same tag but is not a deletable build target"
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 }

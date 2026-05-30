@@ -3,9 +3,11 @@
 //! the live report so the user sees why an item matters on their machine.
 
 use crate::suggestion::{
-    Action, InstallSpec, Scope, Suggestion, SweepSpec, Tag, TomlChange, TomlOp, TomlValue,
+    Action, InstallSpec, PurgeSpec, Scope, Suggestion, SweepSpec, Tag, TomlChange, TomlOp,
+    TomlValue,
 };
 use crate::system::{SystemReport, have, human_bytes};
+use crate::toml_ops;
 use std::path::{Path, PathBuf};
 
 pub fn build(r: &SystemReport) -> Vec<Suggestion> {
@@ -197,6 +199,23 @@ pub fn build(r: &SystemReport) -> Vec<Suggestion> {
         ));
     }
 
+    // Offer the leftover-target purge only once builds are centralized: with
+    // build.target-dir set, every per-project target/ from before the switch is dead
+    // weight that nothing will reuse. Until then deleting them just forces a cold rebuild
+    // into the same scattered place. The card here covers the already-centralized case;
+    // main offers the same purge in the run the user accepts centralization.
+    if let Some(spec) = purge_spec(r) {
+        out.push(purge_sug(
+            "Reclaim leftover per-project target dirs",
+            Tag::Disk,
+            "build.target-dir is set, so new builds share one dir and the old per-project \
+             target/ dirs are now dead weight. Delete them to reclaim that space. Choose how \
+             wide: just this project, or any parent up to your home dir."
+                .into(),
+            spec,
+        ));
+    }
+
     if !have("cargo-machete") {
         out.push(install_sug(
             "Install cargo-machete (find unused deps)",
@@ -209,6 +228,18 @@ pub fn build(r: &SystemReport) -> Vec<Suggestion> {
     }
 
     out
+}
+
+/// The leftover-target purge for this machine, present only once `build.target-dir` is
+/// configured globally. Returned to main so it can offer the purge in the same run the
+/// user accepts centralization, not just on the next one. The configured central dir is
+/// carried in `protected` so the purge never deletes the dir builds were just pointed at.
+pub fn purge_spec(r: &SystemReport) -> Option<PurgeSpec> {
+    let central = toml_ops::global_target_dir_value(r)?;
+    Some(PurgeSpec {
+        candidates: sweep_candidates(&r.project.root),
+        protected: Some(central),
+    })
 }
 
 fn shared_target_dir() -> String {
@@ -247,6 +278,15 @@ fn sweep_sug(title: &str, tag: Tag, why: String, spec: SweepSpec) -> Suggestion 
         tag,
         why,
         action: Action::Sweep(spec),
+    }
+}
+
+fn purge_sug(title: &str, tag: Tag, why: String, spec: PurgeSpec) -> Suggestion {
+    Suggestion {
+        title: title.into(),
+        tag,
+        why,
+        action: Action::Purge(spec),
     }
 }
 

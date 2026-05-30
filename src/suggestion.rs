@@ -105,11 +105,29 @@ impl SweepSpec {
     }
 }
 
+/// A delete-the-leftover-targets run, offered only once `build.target-dir` is set so
+/// the scattered per-project `target/` dirs are redundant. The user picks a directory
+/// from `candidates` (project up to home) at accept time; `protected` is the configured
+/// central target dir, never deleted even if it falls inside the chosen scope.
+#[derive(Clone)]
+pub struct PurgeSpec {
+    pub candidates: Vec<PathBuf>,
+    pub protected: Option<PathBuf>,
+}
+
+impl PurgeSpec {
+    /// One-line label for the doctor's read-only maintenance listing.
+    pub fn display(&self) -> String {
+        "delete leftover per-project target/ dirs".into()
+    }
+}
+
 #[derive(Clone)]
 pub enum Action {
     Toml(TomlChange),
     Install(InstallSpec),
     Sweep(SweepSpec),
+    Purge(PurgeSpec),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

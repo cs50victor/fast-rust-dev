@@ -2,7 +2,7 @@
 //! optimization category), a single Select decision, and apply on accept.
 
 use crate::runner::Runner;
-use crate::suggestion::{Action, RunSpec, Suggestion, SweepSpec, Tag};
+use crate::suggestion::{Action, PurgeSpec, RunSpec, Suggestion, SweepSpec, Tag};
 use crate::system::{self, SystemReport, human_bytes};
 use crate::toml_ops::{self, TomlPlan};
 use crate::ui;
@@ -151,6 +151,18 @@ fn show_card(
                 style(scope).dim(),
             ));
         }
+        Action::Purge(s) => {
+            let scope = if s.candidates.len() == 1 {
+                ui::tildify(&s.candidates[0])
+            } else {
+                format!("a dir you pick · {} options up to ~", s.candidates.len())
+            };
+            body.push_str(&format!(
+                "\n\n{} delete leftover target/ dirs in {}",
+                style("run").bold(),
+                style(scope).dim(),
+            ));
+        }
     }
 
     note(title, body)?;
@@ -208,6 +220,7 @@ fn execute(
         }
         Action::Install(s) => runner.install(s, sug.tag, dry_run)?,
         Action::Sweep(s) => run_sweep(s, sug.tag, runner, dry_run, yes)?,
+        Action::Purge(s) => run_purge(s, dry_run, yes)?,
     }
     Ok(())
 }
@@ -222,7 +235,7 @@ fn filename(path: &Path) -> String {
 /// by sizing the target dirs within it before and after. Dry-run only echoes the
 /// command; the size pass is skipped because nothing is removed.
 fn run_sweep(spec: &SweepSpec, tag: Tag, runner: &Runner, dry_run: bool, yes: bool) -> Result<()> {
-    let dir = pick_sweep_dir(spec, yes)?;
+    let dir = pick_dir(&spec.candidates, yes, "Which directory to sweep?")?;
     let recursive = dir != spec.candidates[0];
     let run = sweep_runspec(&dir, spec.time_days, recursive);
 
@@ -247,14 +260,111 @@ fn run_sweep(spec: &SweepSpec, tag: Tag, runner: &Runner, dry_run: bool, yes: bo
     Ok(())
 }
 
-/// Ask which candidate directory to sweep. A single-option spec or a `--yes` run
-/// takes the narrowest scope (the project dir) without prompting.
-fn pick_sweep_dir(spec: &SweepSpec, yes: bool) -> Result<PathBuf> {
-    if yes || spec.candidates.len() == 1 {
-        return Ok(spec.candidates[0].clone());
+/// Delete the leftover per-project target dirs under a chosen directory, now that
+/// builds are centralized. Reports how many cargo build targets it finds and their
+/// size, then removes them behind an explicit confirm; the configured central dir is
+/// always spared. Destructive, so `--yes` reports nothing and deletes nothing.
+pub(crate) fn run_purge(spec: &PurgeSpec, dry_run: bool, yes: bool) -> Result<()> {
+    let dir = pick_dir(&spec.candidates, yes, "Which directory to clean?")?;
+
+    // Never delete unattended. Under --yes there is no confirm to show, so skip rather
+    // than walk a potentially large tree we would not act on.
+    if yes && !dry_run {
+        log::warning(
+            "Skipped target purge: it needs an interactive confirm; re-run without --yes.",
+        )?;
+        return Ok(());
     }
-    let mut menu = select("Which directory to sweep?");
-    for (i, dir) in spec.candidates.iter().enumerate() {
+
+    let sp = spinner();
+    sp.start("Finding cargo target dirs");
+    let protected = spec
+        .protected
+        .as_deref()
+        .and_then(|p| std::fs::canonicalize(p).ok());
+    let targets: Vec<PathBuf> = system::cargo_build_target_dirs(&dir)
+        .into_iter()
+        .filter(|t| !is_protected(t, protected.as_deref()))
+        .collect();
+    let total: u64 = targets
+        .iter()
+        .filter_map(|t| system::dir_size_bytes(t))
+        .sum();
+    sp.stop(format!(
+        "{} target {} found · {}",
+        targets.len(),
+        if targets.len() == 1 {
+            "directory"
+        } else {
+            "directories"
+        },
+        human_bytes(total),
+    ));
+
+    if targets.is_empty() {
+        log::info("Nothing to reclaim here.")?;
+        return Ok(());
+    }
+    if dry_run {
+        log::warning(format!(
+            "dry-run: would delete {} dir(s), reclaiming {}",
+            targets.len(),
+            human_bytes(total),
+        ))?;
+        return Ok(());
+    }
+
+    let go = cliclack::confirm(format!(
+        "Delete {} target dir(s) and reclaim {}? Each project rebuilds from scratch next time.",
+        targets.len(),
+        human_bytes(total),
+    ))
+    .initial_value(false)
+    .interact()?;
+    if !go {
+        log::info("Left them in place.")?;
+        return Ok(());
+    }
+
+    let mut freed = 0u64;
+    let mut removed = 0usize;
+    for t in &targets {
+        let size = system::dir_size_bytes(t).unwrap_or(0);
+        match std::fs::remove_dir_all(t) {
+            Ok(()) => {
+                freed += size;
+                removed += 1;
+            }
+            Err(e) => {
+                let _ = log::warning(format!("skip {}: {e}", ui::tildify(t)));
+            }
+        }
+    }
+    log::success(format!(
+        "Removed {removed} target dir(s), reclaimed {}",
+        style(human_bytes(freed)).green().bold(),
+    ))?;
+    Ok(())
+}
+
+/// Whether `dir` is the configured central target dir (or sits inside it). The purge
+/// must spare it even when it falls within the chosen scope, or it would wipe the very
+/// dir builds were just pointed at.
+fn is_protected(dir: &Path, protected: Option<&Path>) -> bool {
+    match (protected, std::fs::canonicalize(dir).ok()) {
+        (Some(p), Some(d)) => d == p || d.starts_with(p),
+        _ => false,
+    }
+}
+
+/// Ask which candidate directory to act on. A single option or a `--yes` run takes
+/// the narrowest scope (the project dir) without prompting.
+fn pick_dir(candidates: &[PathBuf], yes: bool, prompt: &str) -> Result<PathBuf> {
+    if yes || candidates.len() == 1 {
+        return Ok(candidates[0].clone());
+    }
+    let mut menu = select(prompt);
+    for (i, dir) in candidates.iter().enumerate() {
         let hint = if i == 0 { "this project" } else { "recursive" };
         menu = menu.item(dir.clone(), ui::tildify(dir), hint);
     }
