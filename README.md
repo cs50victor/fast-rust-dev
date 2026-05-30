@@ -35,6 +35,7 @@ Run it inside a Cargo project (or anywhere, for the global suggestions):
 ```sh
 frd              # report, then the interactive wizard
 frd report       # print the system and project report, then exit
+frd doctor       # audit which optimizations are applied; exit non-zero if any are pending
 frd --dry-run    # show every change as a diff, write and run nothing
 frd --yes        # accept every applicable suggestion without prompting
 frd --root DIR   # operate on DIR instead of the current directory

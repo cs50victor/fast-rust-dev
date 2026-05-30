@@ -28,4 +28,7 @@ pub struct Cli {
 pub enum Commands {
     /// Print the system and project report, then exit.
     Report,
+
+    /// Audit which optimizations are applied, change nothing, and exit non-zero if any are pending.
+    Doctor,
 }
