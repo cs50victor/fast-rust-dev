@@ -15,6 +15,7 @@ clap = { version = "4.6.1", features = ["derive"] }
 cliclack = "0.5.4"
 console = "0.16.3"
 dirs = "6.0.0"
+jwalk = "0.8.1"
 similar = "3.1.1"
 # Pinned to 0.36 on purpose: it has MSRV 1.75 (below our edition-2024 floor, so no cost),
 # while 0.37+ raises the MSRV and 0.39 needs Rust 1.95. Only RAM and disk facts are used.
@@ -24,3 +25,15 @@ toml_edit = "0.25.12"
 # frd recommends `strip` to the projects it tunes, so it ships its own binaries stripped too.
 [profile.release]
 strip = true
+
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.fast-build]
+inherits = "dev"
+debug = 0
+strip = "debuginfo"

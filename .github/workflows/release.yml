@@ -22,6 +22,11 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # .cargo/config.toml carries nightly-only -Z build-speed flags for local dev. Release
+  # builds and `cargo publish` run on stable, which rejects -Z, so clear rustflags here.
+  # RUSTFLAGS overrides build.rustflags in cargo's precedence, and these flags only affect
+  # compile speed, never the output, so release binaries are unchanged.
+  RUSTFLAGS: ""
 
 jobs:
   changelog:

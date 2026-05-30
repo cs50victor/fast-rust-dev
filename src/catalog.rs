@@ -3,10 +3,12 @@
 //! the live report so the user sees why an item matters on their machine.
 
 use crate::suggestion::{
-    Action, InstallSpec, RunSpec, Scope, Suggestion, Tag, TomlChange, TomlOp, TomlValue,
+    Action, InstallSpec, PurgeSpec, Scope, Suggestion, SweepSpec, Tag, TomlChange, TomlOp,
+    TomlValue,
 };
 use crate::system::{SystemReport, have, human_bytes};
-use std::path::PathBuf;
+use crate::toml_ops;
+use std::path::{Path, PathBuf};
 
 pub fn build(r: &SystemReport) -> Vec<Suggestion> {
     let mut out = Vec::new();
@@ -169,27 +171,50 @@ pub fn build(r: &SystemReport) -> Vec<Suggestion> {
     }
 
     // --- tools ---
-    if !have("cargo-sweep") {
+    // Gate the sweep on cargo-sweep being on PATH: offering to run a binary that is
+    // not installed only produces a confusing failed step. When it is missing we offer
+    // the install instead, and a re-run of frd then surfaces the sweep (the same
+    // install-then-rerun flow sccache uses above).
+    if have("cargo-sweep") {
+        out.push(sweep_sug(
+            "Sweep stale build artifacts",
+            Tag::Disk,
+            "Removes artifacts untouched for more than 7 days while keeping warm ones. \
+             Choose how wide to sweep: just this project, or any parent up to your home dir."
+                .into(),
+            SweepSpec {
+                candidates: sweep_candidates(&p.root),
+                time_days: 7,
+            },
+        ));
+    } else {
         out.push(install_sug(
             "Install cargo-sweep (disk reclaim)",
             Tag::Disk,
             "Garbage-collects stale build artifacts that Cargo never removes, by age, instead \
-             of the all-or-nothing cargo clean."
+             of the all-or-nothing cargo clean. Re-run frd afterward to sweep."
                 .into(),
             "cargo-sweep",
             "cargo-sweep",
         ));
     }
-    out.push(run_sug(
-        "Sweep stale artifacts in this project",
-        Tag::Disk,
-        "Removes artifacts untouched for more than 15 days while keeping warm ones. Re-run \
-         with --recursive ~/dev to sweep every repo. Needs cargo-sweep."
-            .into(),
-        "cargo",
-        vec!["sweep".into(), "--time".into(), "15".into()],
-        Some(p.root.clone()),
-    ));
+
+    // Offer the leftover-target purge only once builds are centralized: with
+    // build.target-dir set, every per-project target/ from before the switch is dead
+    // weight that nothing will reuse. Until then deleting them just forces a cold rebuild
+    // into the same scattered place. The card here covers the already-centralized case;
+    // main offers the same purge in the run the user accepts centralization.
+    if let Some(spec) = purge_spec(r) {
+        out.push(purge_sug(
+            "Reclaim leftover per-project target dirs",
+            Tag::Disk,
+            "build.target-dir is set, so new builds share one dir and the old per-project \
+             target/ dirs are now dead weight. Delete them to reclaim that space. Choose how \
+             wide: just this project, or any parent up to your home dir."
+                .into(),
+            spec,
+        ));
+    }
 
     if !have("cargo-machete") {
         out.push(install_sug(
@@ -203,6 +228,18 @@ pub fn build(r: &SystemReport) -> Vec<Suggestion> {
     }
 
     out
+}
+
+/// The leftover-target purge for this machine, present only once `build.target-dir` is
+/// configured globally. Returned to main so it can offer the purge in the same run the
+/// user accepts centralization, not just on the next one. The configured central dir is
+/// carried in `protected` so the purge never deletes the dir builds were just pointed at.
+pub fn purge_spec(r: &SystemReport) -> Option<PurgeSpec> {
+    let central = toml_ops::global_target_dir_value(r)?;
+    Some(PurgeSpec {
+        candidates: sweep_candidates(&r.project.root),
+        protected: Some(central),
+    })
 }
 
 fn shared_target_dir() -> String {
@@ -235,22 +272,60 @@ fn install_sug(title: &str, tag: Tag, why: String, crate_name: &str, bin: &str) 
     }
 }
 
-fn run_sug(
-    title: &str,
-    tag: Tag,
-    why: String,
-    program: &str,
-    args: Vec<String>,
-    cwd: Option<PathBuf>,
-) -> Suggestion {
+fn sweep_sug(title: &str, tag: Tag, why: String, spec: SweepSpec) -> Suggestion {
     Suggestion {
         title: title.into(),
         tag,
         why,
-        action: Action::Run(RunSpec {
-            program: program.into(),
-            args,
-            cwd,
-        }),
+        action: Action::Sweep(spec),
+    }
+}
+
+fn purge_sug(title: &str, tag: Tag, why: String, spec: PurgeSpec) -> Suggestion {
+    Suggestion {
+        title: title.into(),
+        tag,
+        why,
+        action: Action::Purge(spec),
+    }
+}
+
+fn sweep_candidates(root: &Path) -> Vec<PathBuf> {
+    candidates_up_to(root, dirs::home_dir().as_deref())
+}
+
+/// The project dir then each parent up to and including `home`, narrow to wide. If
+/// the project is not under `home` the chain would climb to the filesystem root, so
+/// in that case we offer only the project dir and never sweep toward `/`.
+fn candidates_up_to(root: &Path, home: Option<&Path>) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    for ancestor in root.ancestors() {
+        dirs.push(ancestor.to_path_buf());
+        if Some(ancestor) == home {
+            return dirs;
+        }
+    }
+    vec![root.to_path_buf()]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::candidates_up_to;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn candidates_run_from_project_up_to_home() {
+        let got = candidates_up_to(Path::new("/Users/x/dev/proj"), Some(Path::new("/Users/x")));
+        let want: Vec<PathBuf> = ["/Users/x/dev/proj", "/Users/x/dev", "/Users/x"]
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn project_outside_home_offers_only_itself() {
+        let got = candidates_up_to(Path::new("/tmp/proj"), Some(Path::new("/Users/x")));
+        assert_eq!(got, vec![PathBuf::from("/tmp/proj")]);
     }
 }

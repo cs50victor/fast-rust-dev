@@ -46,6 +46,11 @@ fn main() -> Result<()> {
         ));
     }
 
+    // Whether builds were already centralized at startup. If not, but the user sets
+    // build.target-dir during this run, we offer the leftover-target purge afterward: the
+    // catalog could not include it because the config was still unset when it was built.
+    let centralized_at_start = catalog::purge_spec(&report).is_some();
+
     let all = catalog::build(&report);
     let (pending, already): (Vec<Suggestion>, Vec<Suggestion>) = all
         .into_iter()
@@ -76,7 +81,21 @@ fn main() -> Result<()> {
     let mut runner = runner::Runner::new();
     let summary = wizard::run(&report, pending, &mut runner, args.dry_run, args.yes)?;
 
-    if report.project.target_bytes.is_some() {
+    // Same-run reclaim: if centralization was just accepted, the per-project target/ dirs
+    // are now orphaned. Offer the purge here, since the catalog was built before the write.
+    if !centralized_at_start && let Some(spec) = catalog::purge_spec(&report) {
+        let _ = log::info(
+            "build.target-dir is set now — the old per-project target/ dirs can be reclaimed.",
+        );
+        if let Err(e) = wizard::run_purge(&spec, args.dry_run, args.yes) {
+            let _ = log::error(format!("{e:#}"));
+        }
+    }
+
+    // Skip this when the user already accepted a sweep: re-prompting "accept the
+    // sweep" right after they did is the confusing part. The note still fires when
+    // a target/ exists and no sweep ran, which is who it is actually for.
+    if report.project.target_bytes.is_some() && !summary.swept {
         let _ = log::remark(
             "Existing target/ dirs are not moved automatically. Accept the sweep, or run \
              cargo clean per project, to reclaim space now.",
@@ -117,7 +136,7 @@ pub(crate) fn status_of(r: &SystemReport, s: &Suggestion) -> Status {
                 Status::Pending
             }
         }
-        Action::Run(_) => Status::Pending,
+        Action::Sweep(_) | Action::Purge(_) => Status::Pending,
     }
 }
 
