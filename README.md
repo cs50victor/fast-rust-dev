@@ -3,13 +3,12 @@
   <p><b>Interactive optimizer for local Rust builds.</b></p>
 </div>
 
-`frd` reads your machine and project, then walks you through a catalog of build-speed
-and `target/`-shrinking changes one at a time. You accept or skip each one; nothing is
-written without your say-so.
+`frd` reads your machine and project, then walks you through build-speed and
+`target/`-shrinking changes one at a time. Accept or skip each; it changes nothing
+without your approval.
 
-Works on macOS, Linux, and Windows. It works best on macOS, where every probe and
-suggestion applies; on other platforms the catalog narrows to what fits (for example,
-the macOS-only `split-debuginfo` tweak is hidden).
+Runs on macOS, Linux, and Windows. macOS gets the full catalog; elsewhere `frd` shows
+only the suggestions that fit (the `split-debuginfo` tweak, for one, is macOS-only).
 
 ## Install
 
@@ -25,8 +24,8 @@ From source:
 cargo install frd
 ```
 
-Prebuilt binaries for macOS (Apple Silicon + Intel), Linux (x86_64 + arm64), and
-Windows (x86_64) are attached to each [GitHub release](https://github.com/cs50victor/fast-rust-dev/releases).
+Or download a binary directly: each [GitHub release](https://github.com/cs50victor/fast-rust-dev/releases)
+ships macOS (Apple Silicon + Intel), Linux (x86_64 + arm64), and Windows (x86_64) builds.
 
 ## Usage
 
@@ -40,12 +39,14 @@ frd --yes        # accept every applicable suggestion without prompting
 frd --root DIR   # operate on DIR instead of the current directory
 ```
 
-In the wizard, each suggestion is a card: `[a]ccept`, `[s]kip`, or `[q]uit`.
+Each suggestion is a card: why it helps, the exact diff, and a color for what it
+optimizes (disk, speed, or both). Choose Accept, Skip, or Quit. Installs and sweeps
+stream their output, then fold to one line when they finish.
 
 ## What it can change
 
-Every edit is format-preserving (comments and ordering survive) and backed up with a
-timestamped `.frd-bak-*` copy before writing.
+Every edit preserves your comments and ordering, and copies the file to a timestamped
+`.frd-bak-*` backup first.
 
 - **`~/.cargo/config.toml`** — a shared `target-dir` so repos and git worktrees stop
   duplicating `target/`; on nightly, `no-embed-metadata`; route `rustc` through
