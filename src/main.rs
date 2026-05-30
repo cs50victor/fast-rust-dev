@@ -1,5 +1,6 @@
 mod catalog;
 mod cli;
+mod doctor;
 mod runner;
 mod suggestion;
 mod system;
@@ -22,6 +23,13 @@ fn main() -> Result<()> {
     print_report(&report);
 
     if matches!(args.command, Some(cli::Commands::Report)) {
+        return Ok(());
+    }
+
+    if matches!(args.command, Some(cli::Commands::Doctor)) {
+        if !doctor::run(&report) {
+            std::process::exit(1);
+        }
         return Ok(());
     }
 
@@ -96,7 +104,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn status_of(r: &SystemReport, s: &Suggestion) -> Status {
+pub(crate) fn status_of(r: &SystemReport, s: &Suggestion) -> Status {
     match &s.action {
         Action::Toml(c) => {
             if toml_ops::is_applied(r, c) {
