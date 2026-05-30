@@ -76,7 +76,10 @@ fn main() -> Result<()> {
     let mut runner = runner::Runner::new();
     let summary = wizard::run(&report, pending, &mut runner, args.dry_run, args.yes)?;
 
-    if report.project.target_bytes.is_some() {
+    // Skip this when the user already accepted a sweep: re-prompting "accept the
+    // sweep" right after they did is the confusing part. The note still fires when
+    // a target/ exists and no sweep ran, which is who it is actually for.
+    if report.project.target_bytes.is_some() && !summary.swept {
         let _ = log::remark(
             "Existing target/ dirs are not moved automatically. Accept the sweep, or run \
              cargo clean per project, to reclaim space now.",

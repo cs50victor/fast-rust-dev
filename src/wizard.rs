@@ -16,6 +16,9 @@ pub struct Summary {
     pub skipped: usize,
     pub failed: usize,
     pub quit: bool,
+    /// Whether a sweep was accepted this run. Lets the caller drop the
+    /// "accept the sweep to reclaim space" epilogue once it is moot.
+    pub swept: bool,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -36,6 +39,7 @@ pub fn run(
     let mut applied = 0usize;
     let mut skipped = 0usize;
     let mut failed = 0usize;
+    let mut swept = false;
 
     for (i, sug) in suggestions.iter().enumerate() {
         // Build the TOML plan up front so the card can show the exact diff.
@@ -50,7 +54,10 @@ pub fn run(
         let decision = if yes { Decision::Accept } else { ask()? };
         match decision {
             Decision::Accept => match execute(sug, plan.as_ref(), runner, dry_run, yes) {
-                Ok(()) => applied += 1,
+                Ok(()) => {
+                    applied += 1;
+                    swept |= matches!(sug.action, Action::Sweep(_));
+                }
                 Err(e) => {
                     let _ = log::error(format!("{e:#}"));
                     failed += 1;
@@ -67,6 +74,7 @@ pub fn run(
                     skipped,
                     failed,
                     quit: true,
+                    swept,
                 });
             }
         }
@@ -78,6 +86,7 @@ pub fn run(
         skipped,
         failed,
         quit: false,
+        swept,
     })
 }
 
