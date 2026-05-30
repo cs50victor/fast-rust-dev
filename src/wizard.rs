@@ -2,14 +2,14 @@
 //! optimization category), a single Select decision, and apply on accept.
 
 use crate::runner::Runner;
-use crate::suggestion::{Action, Suggestion};
-use crate::system::SystemReport;
+use crate::suggestion::{Action, RunSpec, Suggestion, SweepSpec, Tag};
+use crate::system::{self, SystemReport, human_bytes};
 use crate::toml_ops::{self, TomlPlan};
 use crate::ui;
 use anyhow::{Result, anyhow};
-use cliclack::{log, note, select};
+use cliclack::{log, note, select, spinner};
 use console::style;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub struct Summary {
     pub applied: usize,
@@ -49,7 +49,7 @@ pub fn run(
 
         let decision = if yes { Decision::Accept } else { ask()? };
         match decision {
-            Decision::Accept => match execute(sug, plan.as_ref(), runner, dry_run) {
+            Decision::Accept => match execute(sug, plan.as_ref(), runner, dry_run, yes) {
                 Ok(()) => applied += 1,
                 Err(e) => {
                     let _ = log::error(format!("{e:#}"));
@@ -129,8 +129,18 @@ fn show_card(
                 style(format!("· via {}", runner.install_method_label())).dim()
             ));
         }
-        Action::Run(s) => {
-            body.push_str(&format!("\n\n{} {}", style("run").bold(), s.display()));
+        Action::Sweep(s) => {
+            let scope = if s.candidates.len() == 1 {
+                ui::tildify(&s.candidates[0])
+            } else {
+                format!("a dir you pick · {} options up to ~", s.candidates.len())
+            };
+            body.push_str(&format!(
+                "\n\n{} cargo sweep --time {} {}",
+                style("run").bold(),
+                s.time_days,
+                style(scope).dim(),
+            ));
         }
     }
 
@@ -168,6 +178,7 @@ fn execute(
     plan: Option<&TomlPlan>,
     runner: &mut Runner,
     dry_run: bool,
+    yes: bool,
 ) -> Result<()> {
     match &sug.action {
         Action::Toml(_) => {
@@ -187,7 +198,7 @@ fn execute(
             }
         }
         Action::Install(s) => runner.install(s, sug.tag, dry_run)?,
-        Action::Run(s) => runner.run(s, sug.tag, dry_run)?,
+        Action::Sweep(s) => run_sweep(s, sug.tag, runner, dry_run, yes)?,
     }
     Ok(())
 }
@@ -196,4 +207,70 @@ fn filename(path: &Path) -> String {
     path.file_name()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string())
+}
+
+/// Resolve the sweep's directory, run cargo-sweep there, and report reclaimed space
+/// by sizing the directory before and after. Dry-run only echoes the command; the
+/// size pass is skipped because nothing is removed.
+fn run_sweep(spec: &SweepSpec, tag: Tag, runner: &Runner, dry_run: bool, yes: bool) -> Result<()> {
+    let dir = pick_sweep_dir(spec, yes)?;
+    let recursive = dir != spec.candidates[0];
+    let run = sweep_runspec(&dir, spec.time_days, recursive);
+
+    if dry_run {
+        return runner.run(&run, tag, true);
+    }
+
+    let before = measure_dir(&dir, "Sizing target before sweep");
+    runner.run(&run, tag, false)?;
+    let after = measure_dir(&dir, "Re-sizing after sweep");
+
+    let freed = before.saturating_sub(after);
+    log::success(format!(
+        "{}  {} → {}  {}",
+        ui::tildify(&dir),
+        human_bytes(before),
+        human_bytes(after),
+        style(format!("(freed {})", human_bytes(freed)))
+            .green()
+            .bold(),
+    ))?;
+    Ok(())
+}
+
+/// Ask which candidate directory to sweep. A single-option spec or a `--yes` run
+/// takes the narrowest scope (the project dir) without prompting.
+fn pick_sweep_dir(spec: &SweepSpec, yes: bool) -> Result<PathBuf> {
+    if yes || spec.candidates.len() == 1 {
+        return Ok(spec.candidates[0].clone());
+    }
+    let mut menu = select("Which directory to sweep?");
+    for (i, dir) in spec.candidates.iter().enumerate() {
+        let hint = if i == 0 { "this project" } else { "recursive" };
+        menu = menu.item(dir.clone(), ui::tildify(dir), hint);
+    }
+    menu.interact()
+        .map_err(|e| anyhow!("interactive prompt needs a TTY; use --yes: {e}"))
+}
+
+fn sweep_runspec(dir: &Path, time_days: u32, recursive: bool) -> RunSpec {
+    let mut args = vec!["sweep".into(), "--time".into(), time_days.to_string()];
+    if recursive {
+        args.push("--recursive".into());
+    }
+    RunSpec {
+        program: "cargo".into(),
+        args,
+        cwd: Some(dir.to_path_buf()),
+    }
+}
+
+/// Total bytes under `dir`, shown via a spinner since a wide sweep root can take a
+/// moment to walk.
+fn measure_dir(dir: &Path, label: &str) -> u64 {
+    let sp = spinner();
+    sp.start(label);
+    let bytes = system::dir_size_bytes(dir).unwrap_or(0);
+    sp.stop(format!("{label}: {}", human_bytes(bytes)));
+    bytes
 }

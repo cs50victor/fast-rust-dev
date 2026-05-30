@@ -141,7 +141,7 @@ fn disk_total_free(path: &Path) -> (Option<u64>, Option<u64>) {
 /// Total size in bytes of every regular file under `path`, summed iteratively so a
 /// deep tree cannot overflow the stack. Symlinks are skipped to avoid double-counting
 /// and cycles. None when the path is absent. Cross-platform replacement for `du -sk`.
-fn dir_size_bytes(path: &Path) -> Option<u64> {
+pub fn dir_size_bytes(path: &Path) -> Option<u64> {
     if !path.exists() {
         return None;
     }

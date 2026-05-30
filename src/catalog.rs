@@ -3,10 +3,10 @@
 //! the live report so the user sees why an item matters on their machine.
 
 use crate::suggestion::{
-    Action, InstallSpec, RunSpec, Scope, Suggestion, Tag, TomlChange, TomlOp, TomlValue,
+    Action, InstallSpec, Scope, Suggestion, SweepSpec, Tag, TomlChange, TomlOp, TomlValue,
 };
 use crate::system::{SystemReport, have, human_bytes};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub fn build(r: &SystemReport) -> Vec<Suggestion> {
     let mut out = Vec::new();
@@ -169,27 +169,33 @@ pub fn build(r: &SystemReport) -> Vec<Suggestion> {
     }
 
     // --- tools ---
-    if !have("cargo-sweep") {
+    // Gate the sweep on cargo-sweep being on PATH: offering to run a binary that is
+    // not installed only produces a confusing failed step. When it is missing we offer
+    // the install instead, and a re-run of frd then surfaces the sweep (the same
+    // install-then-rerun flow sccache uses above).
+    if have("cargo-sweep") {
+        out.push(sweep_sug(
+            "Sweep stale build artifacts",
+            Tag::Disk,
+            "Removes artifacts untouched for more than 15 days while keeping warm ones. \
+             Choose how wide to sweep: just this project, or any parent up to your home dir."
+                .into(),
+            SweepSpec {
+                candidates: sweep_candidates(&p.root),
+                time_days: 15,
+            },
+        ));
+    } else {
         out.push(install_sug(
             "Install cargo-sweep (disk reclaim)",
             Tag::Disk,
             "Garbage-collects stale build artifacts that Cargo never removes, by age, instead \
-             of the all-or-nothing cargo clean."
+             of the all-or-nothing cargo clean. Re-run frd afterward to sweep."
                 .into(),
             "cargo-sweep",
             "cargo-sweep",
         ));
     }
-    out.push(run_sug(
-        "Sweep stale artifacts in this project",
-        Tag::Disk,
-        "Removes artifacts untouched for more than 15 days while keeping warm ones. Re-run \
-         with --recursive ~/dev to sweep every repo. Needs cargo-sweep."
-            .into(),
-        "cargo",
-        vec!["sweep".into(), "--time".into(), "15".into()],
-        Some(p.root.clone()),
-    ));
 
     if !have("cargo-machete") {
         out.push(install_sug(
@@ -235,22 +241,51 @@ fn install_sug(title: &str, tag: Tag, why: String, crate_name: &str, bin: &str) 
     }
 }
 
-fn run_sug(
-    title: &str,
-    tag: Tag,
-    why: String,
-    program: &str,
-    args: Vec<String>,
-    cwd: Option<PathBuf>,
-) -> Suggestion {
+fn sweep_sug(title: &str, tag: Tag, why: String, spec: SweepSpec) -> Suggestion {
     Suggestion {
         title: title.into(),
         tag,
         why,
-        action: Action::Run(RunSpec {
-            program: program.into(),
-            args,
-            cwd,
-        }),
+        action: Action::Sweep(spec),
+    }
+}
+
+fn sweep_candidates(root: &Path) -> Vec<PathBuf> {
+    candidates_up_to(root, dirs::home_dir().as_deref())
+}
+
+/// The project dir then each parent up to and including `home`, narrow to wide. If
+/// the project is not under `home` the chain would climb to the filesystem root, so
+/// in that case we offer only the project dir and never sweep toward `/`.
+fn candidates_up_to(root: &Path, home: Option<&Path>) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    for ancestor in root.ancestors() {
+        dirs.push(ancestor.to_path_buf());
+        if Some(ancestor) == home {
+            return dirs;
+        }
+    }
+    vec![root.to_path_buf()]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::candidates_up_to;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn candidates_run_from_project_up_to_home() {
+        let got = candidates_up_to(Path::new("/Users/x/dev/proj"), Some(Path::new("/Users/x")));
+        let want: Vec<PathBuf> = ["/Users/x/dev/proj", "/Users/x/dev", "/Users/x"]
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn project_outside_home_offers_only_itself() {
+        let got = candidates_up_to(Path::new("/tmp/proj"), Some(Path::new("/Users/x")));
+        assert_eq!(got, vec![PathBuf::from("/tmp/proj")]);
     }
 }

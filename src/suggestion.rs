@@ -88,11 +88,28 @@ impl RunSpec {
     }
 }
 
+/// A cargo-sweep run whose target directory the wizard resolves interactively: the
+/// user picks one of `candidates` (the project dir up to the home dir) at accept
+/// time, so one suggestion can sweep a single repo or a whole tree.
+#[derive(Clone)]
+pub struct SweepSpec {
+    pub candidates: Vec<PathBuf>,
+    pub time_days: u32,
+}
+
+impl SweepSpec {
+    /// The base command, without the directory (resolved interactively at accept
+    /// time). Used by the doctor's read-only maintenance listing.
+    pub fn display(&self) -> String {
+        format!("cargo sweep --time {}", self.time_days)
+    }
+}
+
 #[derive(Clone)]
 pub enum Action {
     Toml(TomlChange),
     Install(InstallSpec),
-    Run(RunSpec),
+    Sweep(SweepSpec),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

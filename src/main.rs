@@ -117,7 +117,7 @@ pub(crate) fn status_of(r: &SystemReport, s: &Suggestion) -> Status {
                 Status::Pending
             }
         }
-        Action::Run(_) => Status::Pending,
+        Action::Sweep(_) => Status::Pending,
     }
 }
 
