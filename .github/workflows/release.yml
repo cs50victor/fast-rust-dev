@@ -1,0 +1,85 @@
+name: Release
+
+# Tag a version to cut a release:
+#   cargo set-version 0.1.0   # or edit Cargo.toml
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# This builds a binary per platform, attaches them to the GitHub Release, and
+# publishes the crate to crates.io. Because the assets are named
+# `frd-<target>.{tar.gz,zip}` with the binary at the archive root, `cargo binstall frd`
+# finds them with no `[package.metadata.binstall]` config (it matches binstall's
+# default naming). `cargo install frd` keeps working by compiling from source.
+
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write # create the release and upload assets
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-latest, target: x86_64-apple-darwin }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          archive="frd-${{ matrix.target }}.tar.gz"
+          tar -czf "$archive" -C "target/${{ matrix.target }}/release" frd
+          echo "ASSET=$archive" >> "$GITHUB_ENV"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = "frd-${{ matrix.target }}.zip"
+          Compress-Archive -Path "target/${{ matrix.target }}/release/frd.exe" -DestinationPath $archive
+          "ASSET=$archive" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ASSET }}
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+
+  publish-crate:
+    name: publish to crates.io
+    # Only publish once every platform binary built, so a failed build never ships a
+    # crates.io version whose GitHub Release is missing binaries.
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Publish
+        run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
