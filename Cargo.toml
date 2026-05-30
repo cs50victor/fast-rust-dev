@@ -2,7 +2,7 @@
 name = "frd"
 version = "0.1.0"
 edition = "2024"
-description = "Interactive CLI that tunes Rust build speed and disk usage via cargo config and Cargo.toml"
+description = "Speed up local Rust builds and shrink target/ with interactive cargo and profile tuning"
 license = "MIT"
 repository = "https://github.com/cs50victor/fast-rust-dev"
 
