@@ -22,6 +22,10 @@ env:
   # compiled crates are reused across runs (the cold-build win for CI).
   RUSTC_WRAPPER: sccache
   SCCACHE_GHA_ENABLED: "true"
+  # .cargo/config.toml carries nightly-only -Z build-speed flags for local dev. CI runs
+  # stable, which rejects -Z, so clear rustflags here. RUSTFLAGS overrides build.rustflags
+  # in cargo's precedence, and these flags only affect compile speed, never the output.
+  RUSTFLAGS: ""
 
 jobs:
   fmt-and-test:
