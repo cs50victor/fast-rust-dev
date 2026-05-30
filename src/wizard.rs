@@ -210,8 +210,8 @@ fn filename(path: &Path) -> String {
 }
 
 /// Resolve the sweep's directory, run cargo-sweep there, and report reclaimed space
-/// by sizing the directory before and after. Dry-run only echoes the command; the
-/// size pass is skipped because nothing is removed.
+/// by sizing the target dirs within it before and after. Dry-run only echoes the
+/// command; the size pass is skipped because nothing is removed.
 fn run_sweep(spec: &SweepSpec, tag: Tag, runner: &Runner, dry_run: bool, yes: bool) -> Result<()> {
     let dir = pick_sweep_dir(spec, yes)?;
     let recursive = dir != spec.candidates[0];
@@ -221,9 +221,9 @@ fn run_sweep(spec: &SweepSpec, tag: Tag, runner: &Runner, dry_run: bool, yes: bo
         return runner.run(&run, tag, true);
     }
 
-    let before = measure_dir(&dir, "Sizing target before sweep");
+    let before = measure_targets(&dir, "Scanning target dirs");
     runner.run(&run, tag, false)?;
-    let after = measure_dir(&dir, "Re-sizing after sweep");
+    let after = measure_targets(&dir, "Re-scanning after sweep");
 
     let freed = before.saturating_sub(after);
     log::success(format!(
@@ -265,12 +265,22 @@ fn sweep_runspec(dir: &Path, time_days: u32, recursive: bool) -> RunSpec {
     }
 }
 
-/// Total bytes under `dir`, shown via a spinner since a wide sweep root can take a
-/// moment to walk.
-fn measure_dir(dir: &Path, label: &str) -> u64 {
+/// Total bytes of the cargo target dirs under `dir`, the only thing cargo-sweep can
+/// reclaim. Sizing just the targets (not the whole selected tree) keeps a wide,
+/// recursive sweep root from walking unrelated source and VCS files. Shown via a
+/// spinner since a wide root can hold many targets.
+fn measure_targets(dir: &Path, label: &str) -> u64 {
     let sp = spinner();
     sp.start(label);
-    let bytes = system::dir_size_bytes(dir).unwrap_or(0);
-    sp.stop(format!("{label}: {}", human_bytes(bytes)));
+    let targets = system::cargo_target_dirs(dir);
+    let bytes: u64 = targets
+        .iter()
+        .filter_map(|t| system::dir_size_bytes(t))
+        .sum();
+    sp.stop(format!(
+        "{label}: {} across {} target dir(s)",
+        human_bytes(bytes),
+        targets.len()
+    ));
     bytes
 }
