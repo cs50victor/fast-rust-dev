@@ -1,9 +1,14 @@
 # Changelog
 
-## [unreleased]
+## [0.1.1] - 2026-05-30
 
 ### Features
 - Add doctor subcommand for read-only optimization audit ([#2](https://github.com/cs50victor/fast-rust-dev/pull/2))
+- Generate changelog and release notes from commits via git-cliff ([#3](https://github.com/cs50victor/fast-rust-dev/pull/3))
+- Interactive disk reclaim via scoped sweep and leftover-target purge ([#5](https://github.com/cs50victor/fast-rust-dev/pull/5))
+
+### Refactor
+- Render CLI through cliclack with themed cards and live job tails ([#4](https://github.com/cs50victor/fast-rust-dev/pull/4))
 
 ## [0.1.0] - 2026-05-30
 
