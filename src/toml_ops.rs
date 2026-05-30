@@ -27,7 +27,11 @@ pub fn plan(report: &SystemReport, change: &TomlChange) -> Result<TomlPlan> {
         set_op(&mut doc, op);
     }
     let after = doc.to_string();
-    Ok(TomlPlan { path, before, after })
+    Ok(TomlPlan {
+        path,
+        before,
+        after,
+    })
 }
 
 pub fn apply(plan: &TomlPlan, dry_run: bool) -> Result<Option<PathBuf>> {
@@ -105,7 +109,11 @@ fn set_op(doc: &mut DocumentMut, op: &TomlOp) {
             let existing: Vec<String> = tbl
                 .get(key)
                 .and_then(|i| i.as_array())
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
             let mut arr = Array::new();
             for f in &existing {
@@ -247,7 +255,10 @@ mod tests {
         assert!(p.after.contains("-Zshare-generics=y"), "got:\n{}", p.after);
 
         std::fs::write(&r.project.cargo_config, &p.after).unwrap();
-        assert!(is_applied(&r, &change), "is_applied should be true after write");
+        assert!(
+            is_applied(&r, &change),
+            "is_applied should be true after write"
+        );
 
         let p2 = plan(&r, &change).unwrap();
         assert_eq!(p.after, p2.after, "re-applying must not duplicate flags");
@@ -258,7 +269,11 @@ mod tests {
     fn preserves_existing_content_and_comments() {
         let dir = temp("preserve");
         let r = report_for(&dir);
-        std::fs::write(&r.project.cargo_toml, "# keep me\n[package]\nname = \"x\"\n").unwrap();
+        std::fs::write(
+            &r.project.cargo_toml,
+            "# keep me\n[package]\nname = \"x\"\n",
+        )
+        .unwrap();
         let change = TomlChange {
             scope: Scope::ProjectCargo,
             ops: vec![TomlOp::new(
@@ -267,8 +282,16 @@ mod tests {
             )],
         };
         let p = plan(&r, &change).unwrap();
-        assert!(p.after.contains("# keep me"), "comment dropped:\n{}", p.after);
-        assert!(p.after.contains("name = \"x\""), "package lost:\n{}", p.after);
+        assert!(
+            p.after.contains("# keep me"),
+            "comment dropped:\n{}",
+            p.after
+        );
+        assert!(
+            p.after.contains("name = \"x\""),
+            "package lost:\n{}",
+            p.after
+        );
         assert!(p.after.contains("[profile.release]"), "got:\n{}", p.after);
         assert!(p.after.contains("strip = true"), "got:\n{}", p.after);
         let _ = std::fs::remove_dir_all(&dir);
