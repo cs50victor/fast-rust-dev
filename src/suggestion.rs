@@ -95,13 +95,18 @@ impl RunSpec {
 pub struct SweepSpec {
     pub candidates: Vec<PathBuf>,
     pub time_days: u32,
+    pub sweep_all: bool,
 }
 
 impl SweepSpec {
     /// The base command, without the directory (resolved interactively at accept
     /// time). Used by the doctor's read-only maintenance listing.
     pub fn display(&self) -> String {
-        format!("cargo sweep --time {}", self.time_days)
+        if self.sweep_all {
+            "cargo sweep --all --recursive".to_string()
+        } else {
+            format!("cargo sweep --time {}", self.time_days)
+        }
     }
 }
 

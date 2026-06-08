@@ -144,12 +144,12 @@ fn show_card(
             } else {
                 format!("a dir you pick · {} options up to ~", s.candidates.len())
             };
-            body.push_str(&format!(
-                "\n\n{} cargo sweep --time {} {}",
-                style("run").bold(),
-                s.time_days,
-                style(scope).dim(),
-            ));
+            let cmd = if s.sweep_all {
+                format!("cargo sweep --all --recursive {}", scope)
+            } else {
+                format!("cargo sweep --time {} {}", s.time_days, scope)
+            };
+            body.push_str(&format!("\n\n{} {}", style("run").bold(), style(cmd).dim(),));
         }
         Action::Purge(s) => {
             let scope = if s.candidates.len() == 1 {
@@ -237,7 +237,7 @@ fn filename(path: &Path) -> String {
 fn run_sweep(spec: &SweepSpec, tag: Tag, runner: &Runner, dry_run: bool, yes: bool) -> Result<()> {
     let dir = pick_dir(&spec.candidates, yes, "Which directory to sweep?")?;
     let recursive = dir != spec.candidates[0];
-    let run = sweep_runspec(&dir, spec.time_days, recursive);
+    let run = sweep_runspec(&dir, spec.time_days, recursive, spec.sweep_all);
 
     if dry_run {
         return runner.run(&run, tag, true);
@@ -372,9 +372,16 @@ fn pick_dir(candidates: &[PathBuf], yes: bool, prompt: &str) -> Result<PathBuf> 
         .map_err(|e| anyhow!("interactive prompt needs a TTY; use --yes: {e}"))
 }
 
-fn sweep_runspec(dir: &Path, time_days: u32, recursive: bool) -> RunSpec {
-    let mut args = vec!["sweep".into(), "--time".into(), time_days.to_string()];
-    if recursive {
+fn sweep_runspec(dir: &Path, time_days: u32, recursive: bool, sweep_all: bool) -> RunSpec {
+    let mut args = vec!["sweep".into()];
+    if sweep_all {
+        args.push("--all".into());
+        args.push("--recursive".into());
+    } else {
+        args.push("--time".into());
+        args.push(time_days.to_string());
+    }
+    if recursive && !sweep_all {
         args.push("--recursive".into());
     }
     RunSpec {
