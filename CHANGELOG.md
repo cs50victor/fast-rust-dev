@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.0] - 2026-06-08
+
+### Features
+- Add recommended sweep suggestion for global cargo target dir ([#7](https://github.com/cs50victor/fast-rust-dev/pull/7))
+
 ## [0.1.1] - 2026-05-30
 
 ### Features
