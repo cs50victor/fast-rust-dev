@@ -6,7 +6,7 @@ use crate::suggestion::{
     Action, InstallSpec, PurgeSpec, Scope, Suggestion, SweepSpec, Tag, TomlChange, TomlOp,
     TomlValue,
 };
-use crate::system::{SystemReport, have, human_bytes};
+use crate::system::{SystemReport, dir_size_bytes, have, human_bytes};
 use crate::toml_ops;
 use std::path::{Path, PathBuf};
 
@@ -176,6 +176,29 @@ pub fn build(r: &SystemReport) -> Vec<Suggestion> {
     // the install instead, and a re-run of frd then surfaces the sweep (the same
     // install-then-rerun flow sccache uses above).
     if have("cargo-sweep") {
+        let global_target = PathBuf::from(shared_target_dir());
+        if global_target.exists() {
+            if let Some(bytes) = dir_size_bytes(&global_target) {
+                if bytes > 0 {
+                    out.push(sweep_sug(
+                        "Sweep stale build artifacts (recommended)",
+                        Tag::Disk,
+                        format!(
+                            "Found {} in {}. Removes artifacts untouched for more than 7 days \
+                             while keeping warm ones.",
+                            human_bytes(bytes),
+                            shared_target_dir()
+                        ),
+                        SweepSpec {
+                            candidates: vec![global_target],
+                            time_days: 7,
+                            sweep_all: true,
+                        },
+                    ));
+                }
+            }
+        }
+
         out.push(sweep_sug(
             "Sweep stale build artifacts",
             Tag::Disk,
@@ -185,6 +208,7 @@ pub fn build(r: &SystemReport) -> Vec<Suggestion> {
             SweepSpec {
                 candidates: sweep_candidates(&p.root),
                 time_days: 7,
+                sweep_all: false,
             },
         ));
     } else {
